@@ -19,31 +19,29 @@ package org.apache.maven.plugin.surefire;
  * under the License.
  */
 
+import java.util.Iterator;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 import org.apache.maven.artifact.Artifact;
 import org.apache.maven.artifact.factory.ArtifactFactory;
-import org.apache.maven.artifact.metadata.ArtifactMetadataSource;
 import org.apache.maven.artifact.repository.ArtifactRepository;
-import org.apache.maven.artifact.resolver.ArtifactNotFoundException;
-import org.apache.maven.artifact.resolver.ArtifactResolutionException;
+import org.apache.maven.artifact.resolver.ArtifactResolutionRequest;
 import org.apache.maven.artifact.resolver.ArtifactResolutionResult;
-import org.apache.maven.artifact.resolver.ArtifactResolver;
-import org.apache.maven.artifact.resolver.filter.ArtifactFilter;
 import org.apache.maven.artifact.resolver.filter.ExcludesArtifactFilter;
 import org.apache.maven.artifact.versioning.DefaultArtifactVersion;
 import org.apache.maven.artifact.versioning.InvalidVersionSpecificationException;
 import org.apache.maven.artifact.versioning.OverConstrainedVersionException;
 import org.apache.maven.artifact.versioning.VersionRange;
 import org.apache.maven.plugin.surefire.log.api.ConsoleLogger;
+import org.apache.maven.repository.RepositorySystem;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
-import java.util.Collections;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
-import static java.util.Collections.singleton;
+import static java.util.Collections.singletonList;
 import static org.apache.maven.artifact.Artifact.SCOPE_TEST;
 import static org.apache.maven.artifact.versioning.VersionRange.createFromVersion;
 
@@ -53,10 +51,26 @@ import static org.apache.maven.artifact.versioning.VersionRange.createFromVersio
  * @author Stephen Connolly
  * @author Kristian Rosenvold
  */
-public class SurefireDependencyResolver
+final class SurefireDependencyResolver
 {
+    static final String PROVIDER_GROUP_ID = "org.apache.maven.surefire";
 
-    private final ArtifactResolver artifactResolver;
+    private static final String[] PROVIDER_CLASSPATH_ORDER = {
+            "surefire-junit3",
+            "surefire-junit4",
+            "surefire-junit47",
+            "surefire-testng",
+            "surefire-junit-platform",
+            "surefire-api",
+            "surefire-logger-api",
+            "common-java5",
+            "common-junit3",
+            "common-junit4",
+            "common-junit48",
+            "common-testng-utils"
+    };
+
+    private final RepositorySystem repositorySystem;
 
     private final ArtifactFactory artifactFactory;
 
@@ -66,27 +80,21 @@ public class SurefireDependencyResolver
 
     private final List<ArtifactRepository> remoteRepositories;
 
-    private final ArtifactMetadataSource artifactMetadataSource;
-
     private final String pluginName;
 
-    protected SurefireDependencyResolver( ArtifactResolver artifactResolver, ArtifactFactory artifactFactory,
-                                          ConsoleLogger log,
+    SurefireDependencyResolver( RepositorySystem repositorySystem, ArtifactFactory artifactFactory, ConsoleLogger log,
                                           ArtifactRepository localRepository,
-                                          List<ArtifactRepository> remoteRepositories,
-                                          ArtifactMetadataSource artifactMetadataSource, String pluginName )
+                                          List<ArtifactRepository> remoteRepositories, String pluginName )
     {
-        this.artifactResolver = artifactResolver;
+        this.repositorySystem = repositorySystem;
         this.artifactFactory = artifactFactory;
         this.log = log;
         this.localRepository = localRepository;
         this.remoteRepositories = remoteRepositories;
-        this.artifactMetadataSource = artifactMetadataSource;
         this.pluginName = pluginName;
     }
 
-
-    public boolean isWithinVersionSpec( @Nullable Artifact artifact, @Nonnull String versionSpec )
+    static boolean isWithinVersionSpec( @Nullable Artifact artifact, @Nonnull String versionSpec )
     {
         if ( artifact == null )
         {
@@ -114,68 +122,78 @@ public class SurefireDependencyResolver
         }
     }
 
-
-    private ArtifactResolutionResult resolveArtifact( Artifact filteredArtifact, Artifact providerArtifact )
-        throws ArtifactResolutionException, ArtifactNotFoundException
+    ArtifactResolutionResult resolveArtifact( Artifact providerArtifact )
     {
-        ArtifactFilter filter = null;
-        if ( filteredArtifact != null )
+        return resolveArtifact( providerArtifact, null );
+    }
+
+    private ArtifactResolutionResult resolveArtifact( Artifact providerArtifact, @Nullable Artifact excludeArtifact )
+    {
+        ArtifactResolutionRequest request = new ArtifactResolutionRequest()
+                                                    .setArtifact( providerArtifact )
+                                                    .setRemoteRepositories( remoteRepositories )
+                                                    .setLocalRepository( localRepository )
+                                                    .setResolveTransitively( true );
+        if ( excludeArtifact != null )
         {
-            filter = new ExcludesArtifactFilter(
-                Collections.singletonList( filteredArtifact.getGroupId() + ":" + filteredArtifact.getArtifactId() ) );
+            String pattern = excludeArtifact.getGroupId() + ":" + excludeArtifact.getArtifactId();
+            request.setCollectionFilter( new ExcludesArtifactFilter( singletonList( pattern ) ) );
         }
-
-        Artifact originatingArtifact = artifactFactory.createBuildArtifact( "dummy", "dummy", "1.0", "jar" );
-
-        return artifactResolver.resolveTransitively( singleton( providerArtifact ), originatingArtifact,
-                                                     localRepository, remoteRepositories, artifactMetadataSource,
-                                                     filter );
+        return repositorySystem.resolve( request );
     }
 
     @Nonnull
-    @SuppressWarnings( "unchecked" )
-    public Set<Artifact> getProviderClasspath( String provider, String version, Artifact filteredArtifact )
-        throws ArtifactNotFoundException, ArtifactResolutionException
+    Set<Artifact> getProviderClasspath( String providerArtifactId, String providerVersion )
     {
-        Artifact providerArtifact = artifactFactory.createDependencyArtifact( "org.apache.maven.surefire",
-                provider, createFromVersion( version ), "jar", null, SCOPE_TEST );
+        Artifact providerArtifact = artifactFactory.createDependencyArtifact( PROVIDER_GROUP_ID,
+                providerArtifactId, createFromVersion( providerVersion ), "jar", null, SCOPE_TEST );
 
-        ArtifactResolutionResult result = resolveArtifact( filteredArtifact, providerArtifact );
+        ArtifactResolutionResult result = resolveArtifact( providerArtifact );
 
         if ( log.isDebugEnabled() )
         {
-            for ( Object o : result.getArtifacts() )
+            for ( Artifact artifact : result.getArtifacts() )
             {
-                Artifact artifact = (Artifact) o;
                 String artifactPath = artifact.getFile().getAbsolutePath();
                 String scope = artifact.getScope();
                 log.debug( "Adding to " + pluginName + " test classpath: " + artifactPath + " Scope: " + scope );
             }
         }
 
-        return result.getArtifacts();
+        return orderProviderArtifacts( result.getArtifacts() );
     }
 
-    public Set<Artifact> addProviderToClasspath( Map<String, Artifact> pluginArtifactMap, Artifact surefireArtifact )
-        throws ArtifactResolutionException, ArtifactNotFoundException
+    Set<Artifact> addProviderToClasspath( Map<String, Artifact> pluginArtifactMap, Artifact surefireArtifact )
     {
         Set<Artifact> providerArtifacts = new LinkedHashSet<Artifact>();
-        if ( surefireArtifact != null )
+        ArtifactResolutionResult artifactResolutionResult = resolveArtifact( surefireArtifact );
+        for ( Artifact artifact : pluginArtifactMap.values() )
         {
-            ArtifactResolutionResult artifactResolutionResult = resolveArtifact( null, surefireArtifact );
-            for ( Artifact artifact : pluginArtifactMap.values() )
+            if ( !artifactResolutionResult.getArtifacts().contains( artifact ) )
             {
-                if ( !artifactResolutionResult.getArtifacts().contains( artifact ) )
+                providerArtifacts.add( artifact );
+            }
+        }
+        return orderProviderArtifacts( providerArtifacts );
+    }
+
+    private static Set<Artifact> orderProviderArtifacts( Set<Artifact> providerArtifacts )
+    {
+        Set<Artifact> orderedProviderArtifacts = new LinkedHashSet<Artifact>();
+        for ( String order : PROVIDER_CLASSPATH_ORDER )
+        {
+            Iterator<Artifact> providerArtifactsIt = providerArtifacts.iterator();
+            while ( providerArtifactsIt.hasNext() )
+            {
+                Artifact providerArtifact = providerArtifactsIt.next();
+                if ( providerArtifact.getArtifactId().equals( order ) )
                 {
-                    providerArtifacts.add( artifact );
+                    orderedProviderArtifacts.add( providerArtifact );
+                    providerArtifactsIt.remove();
                 }
             }
         }
-        else
-        {
-            // Bit of a brute force strategy if not found. Should probably be improved
-            providerArtifacts.addAll( pluginArtifactMap.values() );
-        }
-        return providerArtifacts;
+        orderedProviderArtifacts.addAll( providerArtifacts );
+        return orderedProviderArtifacts;
     }
 }

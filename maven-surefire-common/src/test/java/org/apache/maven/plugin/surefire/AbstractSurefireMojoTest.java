@@ -268,7 +268,6 @@ public class AbstractSurefireMojoTest
         verify( mojo, times( 1 ) ).isChildDelegation();
         verifyPrivate( mojo, times( 1 ) ).invoke( "generateTestClasspath" );
         verify( mojo, times( 1 ) ).getEffectiveForkCount();
-        verify( logger, times( 6 ) ).isDebugEnabled();
         ArgumentCaptor<String> argument = ArgumentCaptor.forClass( String.class );
         verify( logger, times( 6 ) ).debug( argument.capture() );
         assertThat( argument.getAllValues() )

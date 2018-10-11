@@ -35,7 +35,7 @@
   <description>Maven Failsafe MOJO in maven-failsafe-plugin.</description>
 
   <prerequisites>
-    <maven>2.2.1</maven>
+    <maven>3.0</maven>
   </prerequisites>
 
   <properties>
@@ -49,6 +49,7 @@
     <dependency>
       <groupId>org.apache.maven.surefire</groupId>
       <artifactId>maven-surefire-common</artifactId>
+      <version>${project.version}</version>
     </dependency>
     <dependency>
       <groupId>org.apache.maven.plugins</groupId>
@@ -170,7 +171,8 @@
             </goals>
             <configuration>
               <target name="generate-failsafe-test-report">
-                <move file="${project.build.directory}/source-site/resources/xsd/surefire-test-report.xsd" tofile="${project.build.directory}/source-site/resources/xsd/failsafe-test-report.xsd" />
+                <move file="${project.build.directory}/source-site/resources/xsd/surefire-test-report.xsd"
+                      tofile="${project.build.directory}/source-site/resources/xsd/failsafe-test-report.xsd"/>
               </target>
             </configuration>
           </execution>
@@ -184,7 +186,6 @@
         </configuration>
       </plugin>
       <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-shade-plugin</artifactId>
         <executions>
           <execution>
@@ -257,15 +258,7 @@
       </build>
     </profile>
     <profile>
-      <!-- run integration tests
-          to use this profile:
-          or run integration tests: mvn -Prun-its
-      -->
       <id>run-its</id>
-      <properties>
-        <!-- skip tests with -DskipTests -->
-        <skipTests>false</skipTests>
-      </properties>
       <build>
         <defaultGoal>verify</defaultGoal>
         <plugins>
