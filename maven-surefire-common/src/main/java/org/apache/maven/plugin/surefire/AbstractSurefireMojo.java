@@ -23,6 +23,7 @@ package org.apache.maven.plugin.surefire;
 import org.apache.maven.artifact.Artifact;
 import org.apache.maven.artifact.DefaultArtifact;
 import org.apache.maven.artifact.factory.ArtifactFactory;
+import org.apache.maven.artifact.handler.ArtifactHandler;
 import org.apache.maven.artifact.metadata.ArtifactMetadataSource;
 import org.apache.maven.artifact.repository.ArtifactRepository;
 import org.apache.maven.artifact.resolver.AbstractArtifactResolutionException;
@@ -2895,11 +2896,11 @@ public abstract class AbstractSurefireMojo
     final class JUnitPlatformProviderInfo
         implements ProviderInfo
     {
-        private final Artifact junitArtifact;
+        private final Artifact junitPlatformArtifact;
 
-        JUnitPlatformProviderInfo( Artifact junitArtifact )
+        JUnitPlatformProviderInfo( Artifact junitPlatformArtifact )
         {
-            this.junitArtifact = junitArtifact;
+            this.junitPlatformArtifact = junitPlatformArtifact;
         }
 
         @Override
@@ -2912,11 +2913,11 @@ public abstract class AbstractSurefireMojo
         @Override
         public boolean isApplicable()
         {
-            return junitArtifact != null;
+            return junitPlatformArtifact != null;
         }
 
         @Override
-        public void addProviderProperties() throws MojoExecutionException
+        public void addProviderProperties()
         {
             convertGroupParameters();
         }
@@ -2948,18 +2949,8 @@ public abstract class AbstractSurefireMojo
                 return;
             }
             // resolve "junit-jupiter-engine" and its transitive dependencies
-            junitJupiterEngine = new DefaultArtifact(
-                    "org.junit.jupiter",
-                    "junit-jupiter-engine",
-                    junitJupiterApi.getVersionRange(),
-                    "test",
-                    "jar",
-                    "",
-                    junitJupiterApi.getArtifactHandler()
-            );
-            @SuppressWarnings( "unchecked" )
-            Set<Artifact> resolvedArtifacts = resolveArtifact( null, junitJupiterEngine ).getArtifacts();
-            providerArtifacts.addAll( resolvedArtifacts );
+            VersionRange version = junitJupiterApi.getVersionRange();
+            resolve( providerArtifacts, "org.junit.jupiter", "junit-jupiter-engine", version );
         }
 
         private void resolveJUnitVintageEngine( Set<Artifact> providerArtifacts )
@@ -2974,27 +2965,11 @@ public abstract class AbstractSurefireMojo
             {
                 return;
             }
-            // determine version
-            String junitVintageVersion = "5.3.1";
-            Artifact junitPlatformCommons = getProjectArtifactMap().get( "org.junit.platform:junit-platform-commons" );
-            if ( junitPlatformCommons != null )
-            {
-                // heuristic: from Platform "x.y.z" to Vintage "5" + ".y.z"
-                junitVintageVersion = "5" + junitPlatformCommons.getBaseVersion().substring( 1 );
-            }
             // resolve "junit-vintage-engine" and its transitive dependencies
-            junitVintageEngine = new DefaultArtifact(
-                    "org.junit.vintage",
-                    "junit-vintage-engine",
-                    VersionRange.createFromVersion( junitVintageVersion ),
-                    "test",
-                    "jar",
-                    "",
-                    junit.getArtifactHandler()
-            );
-            @SuppressWarnings( "unchecked" )
-            Set<Artifact> resolvedArtifacts = resolveArtifact( null, junitVintageEngine ).getArtifacts();
-            providerArtifacts.addAll( resolvedArtifacts );
+            // heuristic: from Platform "x.y.z" to Vintage "5" + ".y.z"
+            String junitVintageVersion = "5" + junitPlatformArtifact.getBaseVersion().substring( 1 );
+            VersionRange version = VersionRange.createFromVersion( junitVintageVersion );
+            resolve( providerArtifacts, "org.junit.vintage", "junit-vintage-engine", version );
         }
 
         private void alignJUnitPlatformLauncher( Set<Artifact> providerArtifacts )
@@ -3006,25 +2981,25 @@ public abstract class AbstractSurefireMojo
                 providerArtifactMap.put( key, artifact );
             }
             Artifact defaultLauncher = providerArtifactMap.get( "org.junit.platform:junit-platform-launcher" );
-            Artifact junitPlatformCommons = getProjectArtifactMap().get( "org.junit.platform:junit-platform-commons" );
-
-            if ( junitPlatformCommons.getVersion().equals( defaultLauncher.getVersion() ) )
+            if ( junitPlatformArtifact.getVersion().equals( defaultLauncher.getVersion() ) )
             {
                 return;
             }
             // resolve "junit-platform-launcher" and its transitive dependencies
-            Artifact junitPlatformLauncher = new DefaultArtifact(
-                    "org.junit.platform",
-                    "junit-platform-launcher",
-                    junitPlatformCommons.getVersionRange(),
-                    "test",
-                    "jar",
-                    "",
-                    junitPlatformCommons.getArtifactHandler()
-            );
+            VersionRange version =  junitPlatformArtifact.getVersionRange();
+            resolve( providerArtifacts, "org.junit.platform", "junit-platform-launcher", version );
+        }
+
+        /** Resolve artifact and its transitive dependencies and all to the target set. */
+        private void resolve( Set<Artifact> providerArtifacts, String g, String a, VersionRange v )
+        {
+            ArtifactHandler handler = junitPlatformArtifact.getArtifactHandler();
+            Artifact artifact = new DefaultArtifact( g, a, v, "test", "jar", "", handler );
+            getLog().debug( "" );
             @SuppressWarnings( "unchecked" )
-            Set<Artifact> resolvedArtifacts = resolveArtifact( null, junitPlatformLauncher ).getArtifacts();
+            Set<Artifact> resolvedArtifacts = resolveArtifact( null, artifact ).getArtifacts();
             providerArtifacts.addAll( resolvedArtifacts );
+            logDebugOrCliShowErrors( "Resolved (additional) providers artifacts: " + resolvedArtifacts );
         }
     }
 
